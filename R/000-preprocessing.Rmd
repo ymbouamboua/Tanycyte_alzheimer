@@ -1,1 +1,117 @@
+---
+title: "10x Human Median Eminence: Preprocessing"
+author: "Mbouamboua Yvon <yvon.mbouamboua@inserm.fr>"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+date: 'Last update: `r format(Sys.time())`'
+---
+
+# Setup
+
+```{r setup, include=TRUE, message=FALSE, warning=FALSE}
+invisible(gc())
+knitr::opts_chunk$set(warning = FALSE, results = TRUE, message = FALSE, comment = "")
+dir.main <- "/Users/yvon.mbouamboua/Documents/projects/singlecell/HME"
+dir.data <- file.path(dir.main, "data/processed")
+h5 = "filtered_feature_bc_matrix.h5" 
+dir.results <- file.path(dir.main, "results", "000_preprocessing")
+dir.create(dir.results, showWarnings = FALSE, recursive = TRUE)
+
+# Load R packages
+packages <- c("Seurat", "ggplot2", "dplyr", "tidyverse", "grid")
+install_and_load <- function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+    BiocManager::install(pkg, ask = FALSE)
+  }
+  suppressWarnings(suppressMessages(library(pkg, character.only = TRUE)))
+}
+suppressPackageStartupMessages({
+  invisible(lapply(packages, install_and_load))
+})
+
+# Load helper functions
+utils_dir <- "~/Documents/projects/singlecell/utilities/"
+r_files <- list.files(utils_dir, pattern = "\\.R$", full.names = TRUE)
+invisible(suppressWarnings(suppressMessages(lapply(r_files, source))))
+```
+
+# Create seurat objects
+
+```{r create_seurat_object}
+
+file_name <- list("AD_23425","AD_29405", "CTRL_26450", "CTRL_24457")
+
+for (i in 1:length(file_name)) {
+  print(file_name[[i]])  
+  counts <- Read10X_h5(file.path(dir.data, file_name[[i]], h5))
+  sobj <- CreateSeuratObject(counts = counts, project = file_name[[i]])
+  saveRDS(sobj, file.path(dir.results, "rdata", filename = paste0(file_name[[i]], ".rds")))
+  rm(sobj)
+}
+
+```
+
+# Load seurat objects
+
+```{r}
+
+seurat_list <- list()
+file_name <- list("AD_23425","AD_29405", "CTRL_26450", "CTRL_24457")
+
+for (i in 1:length(file_name)) {
+  file_path = list.files(path = file.path(dir.results, "rdata"), pattern =  paste0(file_name[[i]], ".rds"), full.names = T, recursive = F)
+  sobj <- readRDS(file_path)
+  print(unique(sobj$orig.ident))
+  seurat_list[[file_name[[i]]]] <- sobj
+  rm(sobj)
+}
+
+
+```
+
+
+# Filter quality
+
+```{r filter_quality}
+
+merged <- Run_Quality_Control(seurat_input = seurat_list, 
+                           sample_column = "orig.ident", 
+                           min_features = 200, 
+                           max_mito = 5, 
+                           filter_method = "MAD",
+                           MAD = 10,
+                           calculate_dropout = F,
+                           filter_max_counts = T,
+                           filter_doublets = T,
+                           merge_output = T,
+                           dir_results = file.path(dir.results, "QC"))
+
+```
+
+```{r fig.width=5, fig.height=5}
+
+VlnPlot(merged, group.by="orig.ident", features = c("nFeature_RNA", "nCount_RNA","percent_mito")) 
+
+```
+
+
+
+# Save data
+
+```{r}
+
+saveRDS(merged, file.path(dir.results, "rdata/merged_2AD_2CTRL.rds"))
+
+```
+
+# Session Info
+
+```{r session_info}
+utils::capture.output(devtools::session_info())
+```
+
 
