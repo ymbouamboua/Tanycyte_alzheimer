@@ -1,0 +1,716 @@
+---
+title: "Figures"
+author: "Yvon Mbouamboua <yvon.mbouamboua@inserm.fr>"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+date: '`r format(Sys.Date())`'
+---
+
+## Goal
+Final figures
+
+## Setup
+```{r setup, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+root <- '/Users/yvon.mbouamboua/projects/singlecell/000-mead'
+outdir <- file.path(root, 'out', '008-figures')
+invisible(lapply(c(outdir, file.path(outdir, 'data'), file.path(outdir, 'plots')),
+                 dir.create, recursive = TRUE, showWarnings = FALSE))
+srcr <- file.path(root, 'src', 'R')
+invisible(lapply(list.files(srcr, full.names = TRUE), source))
+appdir <- Sys.getenv('APPS', '~/projects/apps')
+if (dir.exists(appdir)) {
+  pkgfile <- file.path(appdir, 'packages.R')
+  if (file.exists(pkgfile)) sys.source(pkgfile, envir = .GlobalEnv)
+  helper_files <- list.files(appdir, pattern = '\\.R$', full.names = TRUE)
+  helper_files <- helper_files[basename(helper_files) != 'packages.R']
+  invisible(lapply(helper_files, sys.source, envir = .GlobalEnv))
+}
+```
+
+
+# Load data
+
+```{r}
+
+obj <- readRDS(file.path(root, "out/000-sauve-2026/data/human_median_eminence.rds"))
+
+```
+
+
+
+# Define colors
+
+```{r fig.width=12, fig.height=8}
+
+custom_colors <- list()
+custom_colors$sample = c("AD-29405" = "#740001","AD-23425" = "#ae0001", "CTRL-26450" = "#6497b1", "CTRL-24457" = "#adcbe3")
+custom_colors$group = c("AD" = "#740001","CTRL" = "#6497b1")
+
+idents <- levels(obj@meta.data[["ann1"]])
+colors <- colorize(x = idents, theme = "tableau", n_colors = length(idents))
+custom_colors$ann1 <- colors
+
+idents <- levels(obj@meta.data[["ann2"]])
+colors <- colorize(x = idents, theme = "tableau", n_colors = length(idents))
+custom_colors$ann2 <- colors
+
+# Idents(obj) <- "ann3"
+# idents <- levels(obj@meta.data[["ann3"]])
+# colors <- custom_palette(n = length(idents))
+# names(colors) <- idents
+# custom_colors$ann3 <- colors
+
+colors <- c(
+  "Oligo-precursors"             = "#1F77B4",  # deep blue
+  "GABAergic"        = "#D62728",  # clear red
+  "Astrocytes"       = "#2CA02C",  # green
+  "Oligodendrocytes"    = "#9467BD",  # purple
+  "Glutamatergic"    = "#FF7F0E",  # orange
+  "Microglia"        = "#8C564B",  # brown
+  "α1-tanycytes"     = "#17BECF",  # cyan
+  "Ependymocytes"    = "#BCBD22",  # olive yellow
+  "α2-β1-tanycytes"  = "#1B6A6A",  # mid gray
+  "VLMCs"            = "#E377C2",  # pink/magenta
+  "Macrophages"      = "#B15928",  # bronze
+  "β2-tanycytes"     = "#AEC7E8",  # pale blue
+  "Endothelial"      = "#364A8A",  # pale green
+  "Pericytes"        = "#C49C94",  # warm beige
+  "Fenestrated-EC"   = "#F7B6D2",  # soft rose
+  "Myelinating-glial" = "#C5B0D5"   # lavender
+)
+
+custom_colors$ann3 <- colors
+  
+Idents(obj) <- "ann4"
+idents <- levels(obj@meta.data[["ann4"]])
+colors <- custom_palette(n = length(idents))
+names(colors) <- idents
+custom_colors$ann4 <- colors
+
+obj@misc$colors <- custom_colors
+
+```
+
+
+# Figure 7a
+
+```{r fig.width=7, fig.height=6}
+
+p <- cellmap(object = obj, group.by = "ann3", label = T, legend = T,  figplot = T, 
+             label.size = 5, repel = T, cols = custom_colors$ann3, leg.ttl = "Cell types")
+p
+savefig(fig = p, filename = file.path("fig7a"), width = 7, height = 5)
+
+```
+
+
+# Figure 7b
+
+```{r fig.width=7, fig.height=6}
+
+p <- cellmap(object = obj, group.by = "sample", label = F, legend = T,  figplot = T, label.size = 5, repel = T, cols = custom_colors$sample)
+p
+savefig(fig = p, filename = file.path("fig7b"), width = 7, height = 5)
+
+```
+
+
+# Fig7c
+
+```{r fig.width=4, fig.height=5}
+
+sub <- genefilter(obj)
+markers <- cellmarker(sub,  group.by = "ann3", only.pos = T, logfc.threshold = 0.25, min.pct = 0.25, test.use = "MAST")
+write.table(markers, file.path(outdir, "data/ann3_markers.tsv"), sep = "\t", row.names = F, quote = F)
+markers <- read.delim(file.path(outdir, "data/ann3_markers.tsv"))
+top <- markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_log2FC)
+p <- celldot(sub, features = rev(c(top$gene)), group.by = "ann3",  x.angle = 45, font.size = 10) 
+p
+savefig(fig = p, filename = file.path(outdir, "plots/fig7c"), width = 15, height = 4.5)
+
+```
+
+
+
+```{r fig.width=14, fig.height=4.5}
+
+extra_markers <- list(
+  "α1-tanycytes" = c("RAX", "COL23A1", "HAS2", "DIO2", "GLUL"),
+  "α2-β1-tanycytes" = c("RAX", "PAX6", "CDH2", "VIM", "FABP7","CRYM","FRZB"),
+  "β2-tanycytes" = c("RAX","GPC3","COL25A1", "DIO2", "PTPRZ1", "GFAP", "CRYM"),
+  "Astrocytes" = c("AQP4", "GFAP", "ALDH1L1", "SLC1A3", "GJA1"),
+  "Ependymocytes" = c("FOXJ1", "S100B", "TTR", "DNAH9", "RSPH1"),
+  "GABAergic" = c("GAD1", "GAD2", "SLC32A1", "DLX1", "DLX2"),
+  "Glutamatergic" = c("SLC17A6", "SLC17A7", "GRIN2B", "GRIA2", "TBR1"),
+  "Endothelial" = c("CLDN5", "CDH5", "PECAM1", "KDR", "FLT1"),
+  "Fenestrated-EC" = c("PLVAP", "ESM1", "RGCC", "ENG", "CD93"),
+  "Pericytes" = c("PDGFRB", "RGS5", "CSPG4", "MCAM", "KCNJ8"),
+  "VLMCs" = c("COL1A1", "COL1A2", "PDGFRA", "DCN", "LUM"),
+  "Myelinating-glial" = c("MBP", "MOG", "PLP1", "OLIG2", "MAG"),
+  "Oligo-precursors" = c("PDGFRA", "CSPG4", "SOX10", "OLIG1", "VCAN"),
+  "Oligodendrocytes" = c("PLP1", "MBP", "MOG", "SOX10", "MAG"),
+  "Microglia" = c("CX3CR1", "P2RY12", "TMEM119", "CSF1R", "AIF1"),
+  "Macrophages" = c("CD163", "MRC1", "LYVE1", "CSF1R", "S100A8")
+)
+
+```
+
+
+
+# Fig7d
+
+```{r fig.width=4, fig.height=4}
+
+sub <- cellslice(obj,  group.by = "ann1", use.harmony = T, harmony.group = "sample", min.dist = 0.5, spread = 1, idents = c("Tanycytes"))
+
+p <- cellmap(object = sub, group.by = "ann3", label = T, legend = F,  figplot = T, label.size = 5, repel = T, cols = custom_colors$ann3)
+p
+save_fig(fig = p, filename = file.path(outdir, "plots/fig7d"), width = 4, height = 4)
+
+```
+
+
+```{r fig.width=15, fig.height=3}
+
+p <- cellfeat(sub, features = c("DIO2","EPHB1", "HAS2", "CRYM","FRZB","GPC3", "COL25A1"), ncol = 7, order = T, no_axes = T, merge_legend = T, base_size = 12)
+p
+save_fig(fig = p1, filename = file.path(outdir, "plots/fig7d2"), width = 8, height = 5)
+
+```
+
+# Figure 7e
+
+```{r}
+
+## Human 10x visium from visium 2 (John A. Tadross et al, 2025)
+visium <- readRDS("~/projects/data/human_HYPOMAP_spatial.rds")
+visium <- UpdateSeuratObject(visium)
+
+```
+
+```{r fig.width=10, fig.height=8}
+
+slice3A <- subset(visium, cells = colnames(visium@images[["slice3A"]]))
+slice3A@images <- slice3A@images["slice3A"]
+
+slice3A@meta.data$regional_clusters <- NULL
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("ME"),"regional_clusters"] <- "ME"
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("ARC"),"regional_clusters"] <-"ARC"
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("VMH"),"regional_clusters"] <-"VMH"
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("LH/RCN"),"regional_clusters"] <-"LH"
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("LTN"),"regional_clusters"] <-"LTN"
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("OT"),"regional_clusters"] <-"OT"
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("TMN"),"regional_clusters"] <-"."
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("LH 1"),"regional_clusters"] <-"LH"
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("Fx/LH"),"regional_clusters"] <-"Fx"
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("Vasculars"),"regional_clusters"] <-"Vasculars"
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("Periventricular"),"regional_clusters"] <-"Periventricular"
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("PVN"),"regional_clusters"] <-"."
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("Ventricular"),"regional_clusters"] <-"Ependymocytes"
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("SON"),"regional_clusters"] <-"SON"
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("Fx/OT/ac"),"regional_clusters"] <-"Fx"
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("Unassigned"),"regional_clusters"] <-"."
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("DMH"),"regional_clusters"] <-"LH"
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("LH 3"),"regional_clusters"] <-"LH"
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("Thalamus 1"),"regional_clusters"] <-"."
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("Thalamus 2"),"regional_clusters"] <-"."
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("LH 2"),"regional_clusters"] <-"LH"
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("MPOA"),"regional_clusters"] <-"."
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("SCN"),"regional_clusters"] <-"."
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("LPOA"),"regional_clusters"] <-"."
+slice3A@meta.data[slice3A@meta.data$regional_clusters_named %in% c("MAM 1"),"regional_clusters"] <-"DMH"
+
+#saveRDS(visium, "~/Documents/projects/data/human_HYPOMAP_spatial.rds")
+
+```
+
+```{r fig.width=4, fig.height=8}
+
+Idents(slice3A) <- "regional_clusters"
+idents <- unique(slice3A@meta.data[["regional_clusters"]])
+visium_colors <- custom_palette(n = length(idents))
+names(visium_colors) <- idents
+
+p <- SpatialDimPlot(slice3A, group.by = "regional_clusters", images = "slice3A", label = T, label.box = T, cols = 
+                    label.color = "white", label.size = 4.5, repel = T, pt.size.factor = 100, image.alpha = 0, alpha = 10) + 
+   ggtitle("Slice3A") + NoLegend()
+save_fig(fig = p, filename = file.path(outdir, "plots/fig7e_left"), width = 8, height = 5)
+
+```
+
+
+```{r fig.width=20, fig.height=3}
+
+p <- spatial_cellfeat(slice3A, features = c("DIO2","EPHB1", "HAS2", "CRYM","FRZB","GPC3", "COL25A1"), interactive = F, pt.size.factor =200, 
+                     images = "slice3A", image.alpha = 0, alpha = 1, ncol = 4)
+p
+save_fig(fig = p, filename = file.path(dir.results, "fig7e_right"), width = 10, height = 10)
+
+```
+
+
+
+
+# Fig7f
+
+```{r fig.width=6, fig.height=3.5}
+
+p <- cellprop(obj, x = "ann3",y = "sample", plot.type  = "bar", legend.title = "",x.angle = 45,legend = T,
+                stack = F, prop = T, theme = "test", colors = custom_colors$sample, x.title = "", x.lab = T, 
+                legend_text_size = 10, legend_ncol = 1, legend.pos = c(0.1, 0.80), font.size = 12)
+p
+savefig(fig = p, filename = file.path(outdir, "plots/fig7f"), width = 6, height = 3.5)
+
+```
+
+
+
+# Fig7g
+
+```{r fig.width=4.5, fig.height=5}
+
+Idents(obj) <- "ann3"
+prop_test <- scProportionTest::sc_utils(obj)
+
+prop_test <- scProportionTest::permutation_test(
+	prop_test, 
+	cluster_identity = "ann3",
+	sample_1 = "CTRL", 
+	sample_2 = "AD",
+	sample_identity = "group",
+	n_permutations = 10000
+)
+
+write.table(prop_test@results$permutation, file.path(outdir, "ann3_permutation_test.tsv"), sep = "\t", row.names = F, quote = F)
+
+
+p <- permut_plot(prop_test, 
+                 theme = "bw", 
+                 leg.p = "bottom", 
+                 order.clusters = T, plot_title = "",
+                 threshold.mode = "fixed",
+                 leg.size = 10,
+                 font.size = 12, 
+                 
+                 show_subtitle = F)
+p
+savefig(fig = p, filename = file.path(outdir, "plots/fig7g"), width = 4.5, height = 5)
+
+```
+
+
+# Fig8a
+
+```{r}
+
+Idents(obj) <- "ann3"
+obj@meta.data$ann3 <- as.character(obj@meta.data$ann3)
+
+Idents(obj) <- "ann3"
+#sub <- subset(obj, idents = c("α1-tanycytes","α2-β1-tanycytes","β2-tanycytes"))
+sub <- generate_pseudo_replicates(sub, sample_column = "sample", n_replicates = 3, method = "split")
+sub <- genefilter(sub)
+pb <- cellbulkde(object = sub, ident_col = "ann3", sample_col = "pseudo_replicate", label_col = "group",ref_level = "CTRL",test_level = "AD")
+
+# pb <- DE_libra(object = sub, ident_col = "ann3", sample_col = "pseudo_replicate", 
+#                label_col = "group", label_levels = c("CTRL", "AD"), de_method = "edgeR", 
+#                de_type = "QLF",label1 = "CTRL", label2 = "AD", min_samples_gene = 6)
+
+saveRDS(pb, file.path(outdir, "EdgeR_QLF_AD_vs_CTRL.rds"))
+write.table(pb$deg, file.path(outdir, "EdgeR_QLF_AD_vs_CTRL.tsv"), sep = "\t", row.names = F, quote = F)
+
+```
+
+
+
+```{r}
+
+# Only keep cell types present in your DE results
+pb <- readRDS(file.path(outdir, "EdgeR_QLF_AD_vs_CTRL.rds"))
+DE = pb$deg
+
+# Remove NA cell types → this is the REAL fix
+DE <- DE[!is.na(DE$cell_type), ]
+
+# Keep only desired cell types
+cell_order <- c("α1-tanycytes","α2-β1-tanycytes","β2-tanycytes","Astrocytes","Ependymocytes","GABAergic",
+                "Glutamatergic","Endothelial","Fenestrated-EC","Pericytes","VLMCs","Myelinating-glial",
+                "Oligo-precursors","Oligodendrocytes","Microglia","Macrophages")
+
+cell_order_present <- cell_order[cell_order %in% DE$cell_type]
+
+# Set factor order
+DE$cell_type <- factor(DE$cell_type, levels = cell_order_present)
+
+# Now run the plot
+p <- plot_de_summary(
+  DE = DE,
+  cell.type.col = "cell_type",
+  pvalue.col = "p_val_adj",
+  logFC.col = "avg_logFC",
+  pvalue = 0.05,
+  logFC = 0,
+  plot.title = "",
+  font.size = 12,
+  show.text = FALSE,
+  axis.text.size = 8,
+  custom.colors = c("Up"="#740001","Down"="#6497b1"),
+  x.angle = 45,
+  flip.coords = FALSE,
+  theme = "bw",
+  dodge.plot = TRUE,
+  leg.pos  = "top",
+  leg.dir = "horizontal",
+  cell.type.order = cell_order_present
+)
+
+
+
+print(p)
+save_fig(fig = p, filename = file.path(dir.results, "fig8a"), width = 6, height = 4)
+
+
+```
+
+
+
+
+
+# Fig8b
+
+
+```{r fig.width=}
+
+get_top_DE_genes <- function(pb, 
+                             celltype, 
+                             top_n = 50, 
+                             extra_genes = NULL) {
+  # 1. Filter significant DE for the given cell type
+  DE_sig_ct <- pb$deg_sig %>%
+    dplyr::filter(cell_type == celltype)
+  
+  if (nrow(DE_sig_ct) == 0) {
+    warning(paste("No DE_sig rows found for cell type:", celltype))
+    return(NULL)
+  }
+  
+  # 2. Select top_n genes by absolute logFC
+  top_genes <- DE_sig_ct %>%
+    dplyr::slice_max(order_by = abs(avg_logFC), n = top_n, with_ties = FALSE) %>%
+    dplyr::pull(gene)
+  
+  # 3. Combine with extra genes
+  deg_genes <- union(top_genes, extra_genes)
+  
+  # 4. Subset the *full* DE table for these genes
+  DE_subset <- pb$deg_sig %>%
+    dplyr::filter(cell_type == celltype, gene %in% deg_genes) %>%
+    dplyr::arrange(desc(abs(avg_logFC)))
+  
+  return(DE_subset)
+}
+
+genes <- c("SPP1", "HIF1A", "HIF3A", "VEGFA", "ENO1","MT1X", "MT1M", "MT1E", "MT2A", "MT3","SOD2", "SOD3",
+                  "SESN1", "SESN2","SELENOS", "GPX3","BNIP3", "DDIT4","CLU", "CSF", "C3")
+
+# obj <- generate_pseudo_replicates(obj, sample_column = "sample",n_replicates = 2, method = "bootstrap")
+# obj$pseudo_replicate = factor(obj$pseudo_replicate)
+
+idents <- unique(obj@meta.data[["pseudo_replicate"]])
+pseudo_colors <- colorize(x = idents, theme = "RdYlBu", n_colors = length(idents))
+
+
+deg <- get_top_DE_genes(pb = pb, celltype = "α1-tanycytes", top_n = 30,extra_genes = genes)
+
+Plot_DE_Pseudobulk(DE = deg , matrices = pb$matrices, n_lab = length(deg$gene), anno_legend = F, 
+                   border_color = "grey40", group1_pattern = "CTRL", group2_pattern = "AD", 
+                   plot_type = "both",color_theme = "viridis",
+                   custom_annotation_colors = list(Samples = pseudo_colors, Groups = custom_colors$group),
+                   legend = T,show.rownames = T, show.colnames = F, width = 5, height = 2, min_samples_gene = 2,
+                   base_size = 14, out_dir = file.path(outdir, "heatmap"), dynamic_height = 10, highlight_genes = genes)
+
+
+deg <- get_top_DE_genes(pb = pb, celltype = "α2-β1-tanycytes", top_n = 30, extra_genes = genes)
+dim(deg)
+
+Plot_DE_Pseudobulk(DE = deg, matrices = pb$matrices, n_lab = length(deg$gene), anno_legend = F, border_color = "grey40",
+                   group1_pattern = "CTRL", group2_pattern = "AD", plot_type = "heatmap",color_theme = "viridis",
+                   custom_annotation_colors = list(Samples = pseudo_colors, Groups = custom_colors$group),
+                   legend = T,show.rownames = T, show.colnames = F, width = 5, height = 2, min_samples_gene = 2,
+                   base_size = 14, out_dir = file.path(outdir, "heatmap"), dynamic_height = 10, highlight_genes = genes)
+
+
+
+deg <- get_top_DE_genes(pb = pb, celltype = "β2-tanycytes", top_n = 40, extra_genes = genes)
+
+Plot_DE_Pseudobulk(DE = deg, matrices = pb$matrices, n_lab = length(deg$gene), anno_legend = T, border_color = "grey40",
+                   group1_pattern = "CTRL", group2_pattern = "AD", plot_type = "heatmap",color_theme = "viridis",
+                   custom_annotation_colors = list(Samples = pseudo_colors, Groups = custom_colors$group),
+                   legend = T,show.rownames = T, show.colnames = F, width = 7, height = 2, min_samples_gene = 2,
+                   base_size = 14, out_dir = file.path(outdir, "heatmap"), dynamic_height = 10, highlight_genes = genes)
+
+
+```
+
+
+
+
+# Figure 8c
+
+```{r}
+
+
+DE_sub <- subset(pb$deg, cell_type == c("α1-tanycytes", "α2-β1-tanycytes", "β2-tanycytes") & p_val_adj <= 0.05)
+
+go <- EnrichGO(de_table = pb$deg, gene_col = "gene", cluster_col = "cell_type", logFC_col = "avg_logFC",
+  pval_col = "p_val_adj", pval_cutoff = 0.05, p_adj_method = "none",ontology = "BP",min_genes = 5,
+  output_dir = file.path(outdir, "GO_BP")
+)
+
+go$Description <- stringr::str_to_upper(go$Description)
+
+
+go_terms_of_interest <- c(
+  "DETOXIFICATION",
+  "CELLULAR RESPONSE TO HYPOXIA",
+  "STRESS RESPONSE TO METAL ION",
+  "RESPONSE TO REACTIVE OXYGEN SPECIES",
+  "COMPLEMENT ACTIVATION, CLASSICAL PATHWAY",
+  "BLEB ASSEMBLY",
+  "LIPID TRANSPORT",
+  "REGULATION OF LIPID METABOLIC PROCESS",
+  "GLUCOSE HOMEOSTASIS",
+  "CALCIUM ION HOMEOSTASIS",
+  "POSTSYNAPSE ORGANIZATION",
+  "VESICLE DOCKING INVOLVED IN EXOCYTOSIS",
+  "REGULATION OF SYNAPTIC VESICLE EXOCYTOSIS",
+  "THYROID HORMONE METABOLIC PROCESS",
+  "THYROID HORMONE TRANSPORT",
+  "ERK1 AND ERK2 CASCADE",
+  "LIGAND-GATED ION CHANNEL SIGNALING PATHWAY",
+  "CALCIUM ION TRANSPORT",
+  "MONOATOMIC ANION TRANSPORT"
+)
+
+```
+
+
+```{r}
+a1 = c("cell growth",
+"cellular response to hypoxia",
+"neuron apoptotic process",
+"reactive oxygen species metabolic process",
+"response to endoplasmic reticulum stress",
+"regulation of metal ion transport",
+"intrinsic apoptotic signaling pathway",
+"cyclic nucleotide metabolic process",
+"cell junction maintenance",
+"cell-matrix adhesion",
+"regulation of synaptic vesicle exocytosis",
+"glucose homeostasis",
+"cilium assembly",
+"regulation of lipid metabolic process",
+"microtubule-based transport")
+
+b2 <- c("cell growth",
+"cellular response to hypoxia",
+"neuron apoptotic process",
+"reactive oxygen species metabolic process",
+"response to endoplasmic reticulum stress",
+"regulation of metal ion transport",
+"stress response to metal ion",
+"cyclic nucleotide metabolic process",
+"cell junction maintenance",
+"cell-matrix adhesion",
+"regulation of synaptic vesicle exocytosis",
+"glucose homeostasis",
+"fatty acid metabolic process",
+"regulation of actin filament-based movement make vector with all upper case")
+
+a1 <-stringr::str_to_upper(a1)
+
+b2 <-stringr::str_to_upper(b2)
+
+go <- read.delim(file.path(dir.results, "GO_BP/Enrich_GO_BP.tsv"))
+
+```
+
+
+```{r fig.width=8, fig.height=5}
+
+p <- plot_go_terms(go_df = go, go_terms_of_interest = a1, cluster = "α1-tanycytes")
+p
+save_fig(fig = p, filename = file.path(dir.results, "fig8c1"), width = 8, height = 5)
+
+p <- plot_go_terms(go_df = go, go_terms_of_interest = go_terms_of_interest, cluster = "α2-β1-tanycytes")
+p
+save_fig(fig = p, filename = file.path(dir.results, "fig8c2"), width = 8, height = 5)
+
+p <- plot_go_terms(go_df = go, go_terms_of_interest = b2, cluster = "β2-tanycytes")
+p
+save_fig(fig = p, filename = file.path(dir.results, "fig8c3"), width = 8, height = 5)
+
+```
+
+
+# Supp_Fig6a
+
+```{r}
+
+# samples <- c("AD-23425","AD-29405", "CTRL-26450", "CTRL-24457")
+# seu <- load_seurat(sample.dirs = samples, parent.dir = file.path(root, "data"), use.filtered = TRUE, merge = FALSE)
+# seu <- run_qc(x = seu, min_feat = 200, min_umi = 500, mad_n = 10, max_mito = 5, species = "human", sample_col = "orig.ident",
+#                       merge_output = F, outdir = file.path(outdir, "data"))
+
+qc_counts <- merge(
+  read_csv(file.path(outdir, "data/QC_summary.csv")) %>%
+    dplyr::select(Sample, PreQC = Pre_Cells),
+  obj@meta.data %>%
+    dplyr::count(sample, name = "PostQC") %>%
+    dplyr::rename(Sample = sample),
+  by = "Sample"
+) %>%
+  tidyr::pivot_longer(c(PreQC, PostQC), names_to = "stage", values_to = "n_cells") %>%
+  dplyr::mutate(
+    Sample = factor(
+      Sample,
+      levels = Sample[stage == "PreQC"][order(-n_cells[stage == "PreQC"])]
+    ),
+    stage = factor(stage, levels = c("PreQC", "PostQC"))
+  )
+
+p <- ggplot(qc_counts, aes(Sample, n_cells, fill = stage)) +
+  geom_col(position = "dodge", color = "black", linewidth = 0.2) +
+  scale_fill_manual(values = c(PreQC = "#1E75BD", PostQC = "#FE9A37")) +
+  plot_theme(font.size = 12, theme = "classic",
+             leg.pos = c(0.2, 0.85), x.angle = 45) +
+  labs(x = "", y = "Number of cells", fill = "")
+
+p
+savefig(fig = p, filename = file.path(outdir, "plots/supp_fig6a"), width = 8, height = 5)
+
+
+```
+
+```{r}
+
+
+p
+
+```
+
+
+# Supp_Fig6b
+
+```{r fig.width=6.5, fig.height=7}
+
+p <- summarize_seurat(object = obj, 
+                 group.by = "ann3", 
+                 condition.by = "sex", 
+                 plot.variable = "total_transcripts",
+                 legend = T, theme = "classic",
+                 legend.ncol = 2,
+                 plot.title = "",
+                 legend.title = "Gender",
+                 reorder.bars = F, 
+                 remove.x.labels = T,
+                 remove.x.title = T,
+                 remove.y.title = F,
+                 legend.position = c(0.10, 0.90),
+                 x.title = "celltype", 
+                 y.title = "Counts", text.size = 12,
+                 custom.colors = c("pink","skyblue"))
+
+save_fig(fig = p$plot, filename = file.path(dir.results, "supp_fig6b_top"), width = 8, height = 5)
+
+
+p <- cellvio(obj, features = c("nFeature_RNA", "nCount_RNA", "percent_mito"), group.by = "ann3", x.angle = 45, 
+                   pt.size = 0, font.size = 12,  cols = custom_colors$ann3, stack = T)
+
+save_fig(fig = p, filename = file.path(dir.results, "supp_fig6b_bottom"), width = 8, height = 7)
+
+```
+
+
+
+
+
+# Sankey plot
+
+```{r fig.width=12, fig.height=10}
+
+colors <- list(
+  "ann1" = custom_colors$ann1,
+  "ann2" = custom_colors$ann2,
+  "ann3" = custom_colors$ann3,
+  "ann4" = custom_colors$ann4
+
+)
+```
+
+
+```{r fig.width=12, fig.height=10}
+
+p <- sankey_plot(obj, 
+              selected_vars = c("ann1", "ann2","ann3","ann4"),
+              custom_colors = colors,  
+              show_percentages = T,
+              show_counts = F, 
+              show_labels = T,
+              flow.alpha = 0.5,
+              label.justify = "right", 
+              label.nudge = 0.5, 
+              prevent_overlap = T)
+print(p)
+save_fig(fig = p, filename = file.path(dir.results, "supp_fig7a"), width = 12, height = 10)
+
+
+```
+
+
+# supp_fig7b
+
+
+```{r fig.width=4, fig.height=5}
+
+sub <- genefilter(obj)
+markers <- cellmarker(sub,  group.by = "ann3", only.pos = T, logfc.threshold = 0.25, min.pct = 0.25, test.use = "MAST")
+write.table(markers, file.path(outdir, "data/ann4_markers.tsv"), sep = "\t", row.names = F, quote = F)
+markers <- read.delim(file.path(outdir, "data/ann4_markers.tsv"))
+top <- markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_log2FC)
+p <- celldot(sub, features = rev(c(top$gene)), group.by = "ann3",  x.angle = 45, font.size = 10) 
+p
+savefig(fig = p, filename = file.path(outdir, "plots/supp_fig7b"), width = 18, height = 7)
+
+```
+
+
+# Supplementary tables
+
+```{r fig.width=10, fig.height=5}
+
+invisible(gc(reset = T))
+p <- summarize_seurat(obj, group.by = "sample", plot.variable = "num_cells", reorder.bars = T, legend = F, x.angle = 90, text.size = 8)
+p
+write.table(p$summary_table, file.path(outdir, "data/Supplementary_Table_2.tsv"), sep = "\t", row.names = F, quote = F)
+
+```
+
+
+```{r}
+
+df <- cluster_stats(obj, group.by = c("sex", "group","sample"), ident = "ann3",rm.sum = F, rm.pct = T)
+write.table(df, file.path(outdir, "data/Supplementary_Table_1.tsv"), sep = "\t", row.names = FALSE, quote = FALSE)
+
+```
+
+
+
+## Session info
+```{r}
+sessionInfo()
+```
