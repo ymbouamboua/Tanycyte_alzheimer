@@ -1,0 +1,420 @@
+---
+title: "Data processing"
+author: "Yvon Mbouamboua <yvon.mbouamboua@inserm.fr>"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+date: '`r format(Sys.Date())`'
+---
+
+## Goal
+Final figures
+
+## Setup
+
+```{r setup, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+root <- '/Users/yvon.mbouamboua/projects/singlecell/000-mead'
+outdir <- file.path(root, 'out', '000-sauve-2026')
+invisible(lapply(c(outdir, file.path(outdir, 'data'), file.path(outdir, 'plots')),
+                 dir.create, recursive = TRUE, showWarnings = FALSE))
+srcr <- file.path(root, 'src', 'R')
+invisible(lapply(list.files(srcr, full.names = TRUE), source))
+appdir <- Sys.getenv('APPS', '~/projects/apps')
+if (dir.exists(appdir)) {
+  pkgfile <- file.path(appdir, 'packages.R')
+  if (file.exists(pkgfile)) sys.source(pkgfile, envir = .GlobalEnv)
+  helper_files <- list.files(appdir, pattern = '\\.R$', full.names = TRUE)
+  helper_files <- helper_files[basename(helper_files) != 'packages.R']
+  invisible(lapply(helper_files, sys.source, envir = .GlobalEnv))
+}
+```
+
+
+# Create seurat objects
+
+```{r create_seurat_object}
+
+file_name <- list("AD_23425","AD_29405", "CTRL_26450", "CTRL_24457")
+
+for (i in 1:length(file_name)) {
+  print(file_name[[i]])  
+  counts <- Read10X_h5(file.path(dir.data, file_name[[i]], h5))
+  sobj <- CreateSeuratObject(counts = counts, project = file_name[[i]])
+  saveRDS(sobj, file.path(outdir, "rdata", filename = paste0(file_name[[i]], ".rds")))
+  rm(sobj)
+}
+
+```
+
+# Load seurat objects
+
+```{r}
+
+seurat_list <- list()
+file_name <- list("AD_23425","AD_29405", "CTRL_26450", "CTRL_24457")
+
+for (i in 1:length(file_name)) {
+  file_path = list.files(path = file.path(outdir, "rdata"), pattern =  paste0(file_name[[i]], ".rds"), 
+                         full.names = T, recursive = F)
+  sobj <- readRDS(file_path)
+  print(unique(sobj$orig.ident))
+  seurat_list[[file_name[[i]]]] <- sobj
+  rm(sobj)
+}
+
+```
+
+
+# Filter quality
+
+```{r filter_quality}
+
+merged <- run_qc(x = seurat.list, min_feat = 200, min_umi = 500, mad_n = 10, max_mito = 5,
+                      species = "human", sample_col = "orig.ident",
+                      merge_output = T, outdir = file.path(outdir, "data"))
+
+saveRDS(merged, file.path(outdir, "data/merged_2AD_2CTRL.rds"))
+
+```
+
+
+# Harmony integration
+
+```{r fig.width=8, fig.height=6}
+
+obj <- readRDS(file.path(outdir, "data/merged_2AD_2CTRL.rds"))
+
+obj <- NormalizeData(obj)
+obj <- FindVariableFeatures(obj)
+obj <- ScaleData(obj)
+obj <- RunPCA(obj, npcs = 50)
+obj <- FindNeighbors(obj, dims = 1:50, reduction = "pca")
+obj <- FindClusters(obj, resolution = 1, cluster.name = "unintegrated_clusters")
+obj <- IntegrateLayers(obj, method = HarmonyIntegration, orig.reduction = "pca", new.reduction = "harmony",verbose = FALSE)
+obj <- FindNeighbors(obj, reduction = "harmony", dims = 1:50)
+obj <- FindClusters(obj, resolution = 1, cluster.name = "harmony_clusters")
+obj <- RunUMAP(obj, reduction = "harmony", dims = 1:50, reduction.name = "umap", min.dist = 0.5)
+obj <- JoinLayers(obj)
+
+DimPlot(obj, group.by = c("orig.ident","seurat_clusters"))
+
+```
+
+
+# Check cluster qualities
+
+```{r}
+cellvio(obj, features = c("nFeature_RNA", "nCount_RNA", "percent_mito"), group.by = "seurat_clusters")
+```
+
+
+# Remove low quality clusters (probabily the doublets)
+
+```{r fig.width=8, fig.height=6}
+
+Idents(obj) <- "seurat_clusters"
+obj <- subset(obj, idents = c(8,10,23,28,29,33,34), invert = T)
+obj <- NormalizeData(obj)
+obj <- FindVariableFeatures(obj)
+obj <- ScaleData(obj)
+obj <- harmony::RunHarmony(obj, group.by.vars = "orig.ident")
+obj <- FindNeighbors(obj, dims = 1:50, reduction = "harmony")
+obj <- FindClusters(obj, resolution = 1.5, cluster.name = "seurat_clusters")
+ndims <- get_pcs(obj, reduction.name = "harmony")
+obj <- RunUMAP(obj, dims = 1:ndims, reduction = "harmony", reduction.name = "umap", min.dist = 1, spread = 2)
+
+DimPlot(obj, group.by = c("orig.ident","seurat_clusters"))
+
+saveRDS(obj, file.path(root, "data/integrated.rds"))
+
+```
+
+
+# Find markers
+
+```{r fig.width=8, fig.height=25}
+
+sub <- genefilter(obj)
+markers <- cellmarker(sub,  group.by = "seurat_clusters", only.pos = T, max.cells.per.ident = 1000)
+rm(sub)
+write.table(markers, file.path(outdir, "data/seurat_markers.tsv"), sep = "\t", row.names = F, quote = F)
+markers <- read.delim(file.path(outdir, "data/seurat_markers.tsv"))
+top <- markers %>% group_by(cluster) %>% top_n(n = 3, wt = avg_log2FC)
+p <- DotPlot(sub, features = top$gene)
+savefig(fig = p, filename = file.path(outdir, "plots/seurat_markers"), width = 20, height = 8)
+
+```
+
+
+
+# Manual annotation
+
+```{r fig.width=14, fig.height=14}
+
+# Neuron
+Neuron <-  c("SLC32A1","GAD1","GAD2", # GABA (Xin Zhou, 2022)
+"SLC17A6","SLC17A7","CRH", # GLUT (Xin Zhou, 2022)
+"SLC18A2","HDC", # Histaminergic (Xin Zhou, 2022)
+"AVP","TAC3","GAL","KISS1","OXT","POMC","SIM1","NPY","COL12A1","TH","NOS1","NEUROD4"
+)
+
+FeaturePlot(obj, features = Neuron)
+VlnPlot(obj, group.by="seurat_clusters", features = c("SLC32A1","GAD1","GAD2","SLC17A6","SLC17A7"), pt.size = 0) 
+
+## Peri
+FeaturePlot(obj, features = "PDGFRB")
+pericyte.cells = cellpick(obj, clusters = c(22), cluster.col = "seurat_clusters", pos.genes =  c("PDGFRB"), expr.thresh = 2)
+
+## VLMC
+FeaturePlot(obj, features = "BMP5")
+
+## Fenestrated EC
+genes = c("PLVAP", "HSPB1", "EHD4","TCIM")
+FeaturePlot(obj, features = genes)
+plvap.cells = cellpick(obj, clusters = c(22), cluster.col = "seurat_clusters", pos.genes =  genes, expr.thresh = 2)
+
+Idents(obj) <- "seurat_clusters"
+obj <- FindSubCluster(obj, cluster = c(35), subcluster.name = "C35",graph.name = "RNA_snn", resolution = 0.1)
+DimPlot(obj, group.by = "C35")
+
+## Astro 
+astro <- c("AQP4","GFAP", "SLC13A5","SLC7A10","KISS1","OXT","DIO2")
+DotPlot(obj, features = astro)
+FeaturePlot(obj, features = astro)
+
+## Ependy 
+ependy <- c("FOXJ1","STOML3","CCDC153","PIFO", "DYNLRB2")
+DotPlot(obj, features = ependy)
+FeaturePlot(obj, features = ependy)
+
+## A1 tany
+A1 <- c("C2CD4A","HAS2","SLC14A2","CCL2","SHISA9","SYNPR","CXCL2","SLC1A2","CHST8","CXCL12","VIM","DIO2")
+DotPlot(obj, features = A1)
+Feature_Plot(obj, features = c(A1,"AGT","TGFB2"))
+FeaturePlot(obj, features = c("DIO2","AQP4","S100A10","GPX3","SCG3","TPPP3","SV2C","CD44"))
+a2.cells <- WhichCells(obj, idents = 1)
+
+## Tany A2
+A2 <- c("FSHR","LTF","LRAT","CCDC85A","PRR16","GALNT15","ID3","CD44","DUSP2","PLCXD3","VCAN","DPP10","NRXN3","COL24A1")
+DotPlot(obj, features = A2)
+FeaturePlot(obj, features = A2)
+
+## Tany-interferon
+tany_inf <- c("GPX3","IFITM3","IFI27","MT1X","CXCL14","SFRP2","KDR","IGFBP5","TIMP1","IRF7")
+DotPlot(obj, features = tany_inf)
+FeaturePlot(obj, features = tany_inf)
+
+## B1 tany
+B1 <- c("CRYM","FRZB","NPSR1","TPH1","NRG1","DIO2","FGF10","CXCL3","COL4A3","CUX2")
+DotPlot(obj, features = B1)
+Feature_Plot(obj, features = B1, no_axes = T, ncol = 4)
+
+## B2
+B2 <- c("COL25A1","FGF10","A2M","MEST","FRZB","PENK","CRYM")
+DotPlot(obj, features = B2)
+FeaturePlot(obj, features = B2)
+
+## Immune
+FeaturePlot(obj, features = c("THEMIS","PTPRC","MARCO"))
+
+## Micg annotation
+FeaturePlot(obj, features = c("CSF1R", "MERTK", "CX3CR1"))
+
+## MAC
+FeaturePlot(obj, features = c("MARCO","CD68"))
+
+```
+
+## ann1
+
+```{r}
+
+obj@meta.data$ann1 <- NULL
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(9,27,39,4,18,19,23,36,11,33,17,24,34,28,38,
+                                                   37,32,35,31,15,14,16,24,26,29),"ann1"] <-"Neurons"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(5,20,10),"ann1"] <-"Tanycytes"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(1,7,12),"ann1"] <-"Astrocytes"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(0,6,8,40),"ann1"] <-"Immunes"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(25),"ann1"] <-"Ependymocytes"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(2,3,13,21),"ann1"] <-"Oligodendrocytes"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(22,30),"ann1"] <-"Vasculars"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(41),"ann1"] <-"Myelinating-glial"
+
+DimPlot(obj, group.by = "ann1")
+
+```
+
+
+## ann2
+
+```{r}
+
+obj@meta.data$ann2 <- NULL
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(9,27,39),"ann2"] <-"Glutamatergic"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(4,18,19,23,36,11,33,17,24,34,28,38,37,32,35,31,15,14,16,24,26,29),"ann2"] <-"GABAergic"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(5,10,20),"ann2"] <-"Tanycytes"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(1,7,12),"ann2"] <-"Astrocytes"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(6),"ann2"] <-"Myeloid"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(0,8,40),"ann2"] <-"Microglia"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(25),"ann2"] <-"Ependymocytes"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(3),"ann2"] <-"Oligo-precursors"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(2,13,21),"ann2"] <-"Oligodendrocytes"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(22),"ann2"] <-"Endothelial"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(41),"ann2"] <-"Myelinating-glial"
+obj@meta.data[rownames(obj@meta.data) %in% pericyte.cells,"ann2"] <- "Pericytes" # PDGFRB
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(30),"ann2"] <-"VLMCs"
+
+DimPLot(obj, group.by = "ann2")
+
+```
+
+
+## ann3
+
+```{r}
+
+obj@meta.data$ann3 <- NULL
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(9,27,39),"ann3"] <-"Glutamatergic"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(4,18,19,23,36,11,33,17,24,34,28,38,37,32,35,31,15,14,16,24,26,29),"ann3"] <-"GABAergic"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(1,7,12),"ann3"] <-"Astrocytes" # AGT, AQP4
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(10),"ann3"] <-"α1-tanycytes" # SLC14A2
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(5),"ann3"] <-"α2-β1-tanycytes" # CRYM, FRZB
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(20),"ann3"] <-"β2-tanycytes" # COL25A1
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(25),"ann3"] <- "Ependymocytes" # CCDC153
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(6),"ann3"] <-"Macrophages" # MARCO
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(0,8,40),"ann3"] <- "Microglia" # CX3CR1
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(3),"ann3"] <-"Oligo-precursors" # OLIG1
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(2,13,21),"ann3"] <-"Oligodendrocytes" # MBP
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(22),"ann3"] <-"Endothelial" # VWF
+obj@meta.data[rownames(obj@meta.data) %in% plvap.cells,"ann3"] <- "Fenestrated-EC" # PLVAP
+obj@meta.data[rownames(obj@meta.data) %in% pericyte.cells,"ann3"] <- "Pericytes" # PDGFRB
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(30),"ann3"] <-"VLMCs" # BMP5
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(41),"ann3"] <-"Myelinating-glial" # CDH19
+
+DimPlot(obj, group.by = "ann3")
+
+```
+
+
+## ann4
+
+```{r fig.width=10, fig.height=10}
+
+obj@meta.data$ann4 <- NULL
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(1,7,12),"ann4"] <-"Astrocytes" # AGT, AQP4
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(10),"ann4"] <-"α1-tanycytes" # SLC14A2
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(5),"ann4"] <-"α2-β1-tanycytes" # CRYM, FRZB
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(20),"ann4"] <-"β2-tanycytes" # COL25A1
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(25),"ann4"] <- "Ependymocytes" # CCDC153
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(6),"ann4"] <-"Macrophages" # MARCO
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(0,8,40),"ann4"] <- "Microglia" # CX3CR1
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(3),"ann4"] <-"Oligo-precursors" # OLIG1
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(2,13,21),"ann4"] <-"Oligodendrocytes" # MBP
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(22),"ann4"] <-"Endothelial" # VWF
+obj@meta.data[rownames(obj@meta.data) %in% plvap.cells,"ann4"] <- "Fenestrated-EC" # PLVAP
+obj@meta.data[rownames(obj@meta.data) %in% pericyte.cells,"ann4"] <- "Pericytes" # PDGFRB
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(30),"ann4"] <-"VLMCs" # BMP5
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(41),"ann4"] <-"Myelinating-glial" # CDH19
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(36),"ann4"] <-"AVP+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(16),"ann4"] <-"POMC+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(11,23),"ann4"] <-"KISS1+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(15),"ann4"] <-"NPY+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(28),"ann4"] <-"AGRP+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(27),"ann4"] <-"ONECUT1+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(26),"ann4"] <-"GRIP2+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(14),"ann4"] <-"CYSLTR2+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(29),"ann4"] <-"NDST4+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(32),"ann4"] <-"INPP4B+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(35),"ann4"] <-"LHX1+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(34),"ann4"] <-"RELN+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(4),"ann4"] <-"CALM3+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(17),"ann4"] <-"GAL+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(18),"ann4"] <-"GAL+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(33),"ann4"] <-"ZNF831+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(37),"ann4"] <-"SLC26A4+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(38),"ann4"] <-"HDC+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(9),"ann4"] <-"CHRM2+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(39),"ann4"] <-"LMX1A+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(24),"ann4"] <-"MTUS2+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(31),"ann4"] <-"THSD7B+"
+obj@meta.data[obj@meta.data$seurat_clusters %in% c(19),"ann4"] <-"GALNTL6+"
+
+DimPlot(obj, group.by = "ann4")
+
+```
+
+
+# Add metadata
+
+```{r}
+
+obj@meta.data$group <- NULL
+obj@meta.data[obj@meta.data$orig.ident %in% c("AD_23425","AD_29405"),"group"] <-"AD" 
+obj@meta.data[obj@meta.data$orig.ident %in% c("CTRL_26450","CTRL_24457"),"group"] <-"CTRL" 
+obj$group <- factor(obj$group, levels = c("AD","CTRL"))
+
+obj@meta.data$sex <- NULL
+obj@meta.data[obj@meta.data$orig.ident %in% c("CTRL_26450"),"sex"] <-"F"
+obj@meta.data[obj@meta.data$orig.ident %in% c("AD_23425","AD_29405","CTRL_24457"),"sex"] <-"M"
+
+obj@meta.data$age <- NULL
+obj@meta.data[obj@meta.data$orig.ident %in% c("AD_29405"),"age"] <-"74" 
+obj@meta.data[obj@meta.data$orig.ident %in% c("AD_23425"),"age"] <-"61" 
+obj@meta.data[obj@meta.data$orig.ident %in% c("CTRL_24457"),"age"] <-"71" 
+obj@meta.data[obj@meta.data$orig.ident %in% c("CTRL_26450"),"age"] <-"63" 
+
+obj@meta.data$sample <- NULL
+obj@meta.data[obj@meta.data$orig.ident %in% "AD_23425","sample"] <- "AD-23425"
+obj@meta.data[obj@meta.data$orig.ident %in% "AD_29405","sample"] <- "AD-29405"
+obj@meta.data[obj@meta.data$orig.ident %in% "CTRL_26450","sample"] <- "CTRL-26450"
+obj@meta.data[obj@meta.data$orig.ident %in% "CTRL_24457","sample"] <- "CTRL-24457"
+
+obj$sample <- factor(obj$sample, levels = c("AD-29405","AD-23425","CTRL-26450","CTRL-24457"))
+
+```
+
+
+
+## Order the cells
+
+```{r}
+
+obj@meta.data$ann1 <- factor(obj@meta.data$ann1, levels = c("Tanycytes","Astrocytes","Ependymocytes","Neurons","Vasculars","Myelinating-glial","Oligodendrocytes","Immunes"))
+
+obj$ann2 <- factor(obj$ann2, levels = c("Tanycytes", "Astrocytes","Ependymocytes","GABAergic","Glutamatergic","Endothelial","Pericytes","VLMCs", "Myelinating-glial", "Oligo-precursors","Oligodendrocytes","Microglia","Myeloid"))
+
+
+obj$ann3 <- factor(obj$ann3, levels = c("α1-tanycytes","α2-β1-tanycytes","β2-tanycytes", "Astrocytes","Ependymocytes","GABAergic","Glutamatergic","Endothelial","Fenestrated-EC","Pericytes","VLMCs", "Myelinating-glial", "Oligo-precursors","Oligodendrocytes","Microglia","Macrophages"))
+
+tany <- c("α1-tanycytes","α2-β1-tanycytes","β2-tanycytes")
+astro <- c("Astrocytes")
+oligo <- c("Oligo-precursors","Oligodendrocytes")
+immune <- c("Microglia","Macrophages")
+Vascular <- c("Endothelial","Fenestrated-EC","Pericytes","VLMCs")
+ependy <- "Ependymocytes"
+myelin <- "Myelinating-glial"
+
+Idents(obj) <- "ann2"
+sub <- subset(obj, idents = "GABAergic")
+gaba <- sort(unique(sub$ann4))
+
+Idents(obj) <- "ann2"
+sub <- subset(obj, idents = "Glutamatergic")
+glut <- sort(unique(sub$ann4))
+rm(sub)
+
+obj@meta.data$ann4 <- factor(obj@meta.data$ann4, levels = c(tany, astro, ependy, gaba,glut,Vascular,myelin,oligo,immune))
+
+saveRDS(obj, file.path(outdir, "data/human_median_eminence.rds"))
+
+```
+
+
+
+## Session info
+```{r}
+sessionInfo()
+```
