@@ -2663,255 +2663,231 @@ cellvio <- function(
   plt
 }
 
-#' Feature Plot Wrapper for Seurat Objects
+#' Cell Feature Plot for Seurat Objects
 #'
-#' This function creates feature plots for one or multiple features in a Seurat object.
-#' It preserves the default Seurat behavior while providing options for custom color palettes,
-#' viridis palettes, NA color, legend merging, orientation, and size.
+#' A flexible wrapper around Seurat's `FeaturePlot` to visualize gene expression or metadata 
+#' features in a Seurat object. Supports custom color palettes, viridis, and hotspot/rainbow palettes.
 #'
-#' @param seurat_object A Seurat object.
-#' @param features A character vector of feature names to plot (genes or metadata columns).
-#' @param colors_use Optional vector of colors to use for the gradient. Must have at least 2 colors.
-#' @param theme_color Color theme to use if `colors_use` is NULL. Default is "Reds".
-#' @param use_viridis Logical, whether to use a viridis palette. Default is FALSE.
-#' @param viridis_option Character, the viridis palette option to use ("viridis", "magma", "plasma", "inferno", "cividis", etc.). Default is "viridis".
-#' @param reverse_colors Logical, whether to reverse the color scale. Default is FALSE.
-#' @param na_color Color to use for NA values. Default is "lightgray".
-#' @param na_cutoff Numeric cutoff for minimal expression to show. Default is 1e-9.
-#' @param order Logical, whether to order points by expression. Default is FALSE.
-#' @param pt.size Numeric, size of points. Default automatically adjusts to number of cells.
-#' @param base_size Numeric, base font size for plot title and axes. Default is 14.
-#' @param legend.text.size Numeric, font size for legend text. Default is 12.
-#' @param reduction Character, which dimensional reduction to use. Default uses Seurat's `DefaultDimReduc()`.
-#' @param raster Logical, whether to rasterize the plot for speed. Default TRUE for >2e5 cells.
-#' @param raster.dpi Numeric vector of length 2, resolution for rasterized plots. Default c(512,512).
-#' @param split.by Character, metadata column to split plots by.
-#' @param ncol Number of columns when combining plots. Default NULL.
-#' @param layer Character, which assay slot to use. Default is "data".
-#' @param label Logical, whether to add cluster labels. Default FALSE.
-#' @param no_axes Logical, whether to remove axes. Default FALSE.
-#' @param blend Logical, whether to create a blend plot for exactly 2 features. Default FALSE.
-#' @param merge_legend Logical, whether to merge legends for multiple plots. Default FALSE.
-#' @param merge.leg.pos Position of merged legend ("right", "bottom", etc.). Default "right".
-#' @param legend.orientation Legend orientation: "vertical" or "horizontal". Default "vertical".
-#' @param legend.width Unit object specifying width of legend bar. Default `unit(1,"mm")`.
-#' @param legend.height Unit object specifying height of legend bar. Default `unit(8,"mm")`.
-#' @param ... Additional arguments passed to Seurat's `FeaturePlot()`.
+#' @param object A `Seurat` object.
+#' @param features Character vector of features (genes or metadata columns) to plot.
+#' @param cols Optional character vector of colors for plotting.
+#' @param theme.cols Character. Predefined theme color palette (default: `"Reds"`). Options include `"Reds"`, `"Blues"`, etc., or custom list palettes `"hotspot"` and `"rainbow"`.
+#' @param viridis Logical. If TRUE, use viridis palette instead of RColorBrewer or custom palettes.
+#' @param viridis.opt Character. Viridis palette option (default: `"D"`).
+#' @param rev.cols Logical. Reverse the color palette (default: `FALSE`).
+#' @param na.col Color for NA or below-cutoff expression values (default: `"lightgray"`).
+#' @param order Logical. If TRUE, plot high-expression cells on top (default: `FALSE`).
+#' @param pt.size Numeric. Point size. If NULL, automatically calculated based on number of cells.
+#' @param font.size Numeric. Base font size for plot titles and axis labels (default: 10).
+#' @param reduction Character. Dimensional reduction to use (default: first available in Seurat object).
+#' @param na.cutoff Numeric. Minimum expression value for coloring; below this will be NA if palette requires (default: 1e-9).
+#' @param raster Logical. If TRUE, rasterize points for faster plotting of large datasets.
+#' @param raster.dpi Numeric vector of length 2. DPI for rasterization (default: c(512,512)).
+#' @param split.by Character. Metadata column to split the plot.
+#' @param ncol Numeric. Number of columns when combining multiple plots.
+#' @param layer Character. Seurat assay slot to fetch data from (default: `"data"`).
+#' @param label Logical. Whether to label clusters (default: FALSE).
+#' @param axes Logical. Whether to show axes (default: TRUE).
+#' @param combine Logical. Whether to return a single combined plot (default: TRUE).
+#' @param blend Logical. Whether to blend exactly two features (default: FALSE).
+#' @param merge.leg Logical. Whether to merge multiple legends into one (default: FALSE).
+#' @param theme.style Character. ggplot2 theme to apply (default: `"classic"`).
+#' @param ... Additional arguments passed to `Seurat::FeaturePlot`.
 #'
-#' @return A ggplot object (or patchwork) containing the feature plots.
+#' @return A `ggplot` object (or `patchwork` object if multiple features).
 #' @export
 #'
 #' @examples
-#' \dontrun{
-#' cellfeat(
-#'   seurat_object = obj,
-#'   features = c("TEX15","TP63"),
-#'   merge_legend = TRUE,
-#'   merge.leg.pos = "bottom",
-#'   legend.orientation = "horizontal",
-#'   legend.width = unit(10,"mm"),
-#'   legend.height = unit(1,"mm"),
-#'   theme_color = "Reds",
-#'   no_axes = TRUE,
-#'   ncol = 1,
-#'   na_cutoff = 0.5
-#' )
-#' }
+#' # Single feature with default Reds palette
+#' cellfeat(seurat_obj, features = "POMC")
+#'
+#' # Multiple features with viridis palette and merged legend
+#' cellfeat(seurat_obj, features = c("POMC", "NPY"), viridis = TRUE, merge.leg = TRUE)
+#'
+#' # Blend two features
+#' cellfeat(seurat_obj, features = c("POMC", "NPY"), blend = TRUE)
+#' 
 cellfeat <- function(
-    seurat_object,
+    object,
     features,
-    colors_use = NULL,
-    theme_color = "Reds",
-    use_viridis = FALSE,
-    viridis_option = "viridis",
-    reverse_colors = FALSE,
-    na_color = "lightgray",
-    na_cutoff = 1e-9,
+    cols = NULL,
+    theme.cols = "Reds",
+    viridis = FALSE,
+    viridis.opt = "D",
+    rev.cols = FALSE,
+    na.col = "lightgray",
     order = FALSE,
     pt.size = NULL,
-    base_size = 10,
-    legend.text.size = 10,
+    font.size = 10,
     reduction = NULL,
+    na.cutoff = 1e-9,
     raster = NULL,
-    raster.dpi = c(512,512),
+    raster.dpi = c(512, 512),
     split.by = NULL,
     ncol = NULL,
     layer = "data",
     label = FALSE,
-    no_axes = FALSE,
+    axes = TRUE,
+    combine = TRUE,
     blend = FALSE,
-    merge_legend = FALSE,
-    merge.leg.pos = "right",
-    legend.orientation = c("vertical","horizontal"),
-    legend.title.pos = "left",
-    legend.title.angle = 90,
-    legend.width = grid::unit(0.8,"mm"),
-    legend.height = grid::unit(6,"mm"),
+    merge.leg = FALSE,
+    theme.style = "classic",
     ...
-){
-  require(Seurat)
-  require(ggplot2)
-  require(patchwork)
-  require(RColorBrewer)
+) {
   
-  reduction <- reduction %||% DefaultDimReduc(seurat_object)
-  legend.orientation <- match.arg(legend.orientation)
-  
-  if (merge_legend) {
-    if (merge.leg.pos %in% c("right","left")) {
-      legend.orientation <- "vertical"
-      legend.title.pos   <- "left"
-      legend.title.angle <- 90
-    } else if (merge.leg.pos %in% c("bottom","top")) {
-      legend.orientation <- "horizontal"
-      legend.title.pos   <- "top"
-      legend.title.angle <- 0
-    }
-  }
-  
-  # Handle colors
-  if(!is.null(colors_use)){
-    if(length(colors_use)<2) stop("colors_use must contain at least 2 colors")
-    if(reverse_colors) colors_use <- rev(colors_use)
-  } else if (isTRUE(use_viridis)){
-    require(viridis)
-    colors_use <- viridis::viridis(9, option = viridis_option)
-    if(reverse_colors) colors_use <- rev(colors_use)
-  } else {
-    custom_palettes <- list(
-      hotspot = c("navy", "lightblue", "yellow", "orange", "red"),
-      five_rainbow = c("blue", "green", "yellow", "orange", "red")
-    )
-    if(theme_color %in% names(custom_palettes)){
-      colors_use <- custom_palettes[[theme_color]]
-    } else {
-      colors_use <- RColorBrewer::brewer.pal(9, theme_color)
-    }
-    if(reverse_colors) colors_use <- rev(colors_use)
-  }
-  
-  # Auto pt.size
-  if(is.null(pt.size)){
-    n_cells <- ncol(seurat_object)
-    raster <- raster %||% (n_cells > 2e5)
-    pt.size <- if(raster) 1 else min(1583 / n_cells,1)
-  }
-  
-  # Check features
-  available_features <- c(rownames(seurat_object), colnames(seurat_object@meta.data))
-  all_found_features <- intersect(features, available_features)
-  if(length(all_found_features)==0) stop("No features found in Seurat object")
-  
-  # Blend plot (leave as before but make consistent legend if requested) 
-  if(blend){
-    if(length(all_found_features)!=2) stop("blend=TRUE requires exactly 2 features")
-    p <- FeaturePlot(
-      seurat_object,
-      features = all_found_features,
-      blend = TRUE,
-      pt.size = pt.size,
-      reduction = reduction,
-      raster = raster,
-      raster.dpi = raster.dpi,
-      label = label,
-      ...
-    )
-    if(no_axes) p <- p & NoAxes()
-    if(merge_legend){
-      p <- p + plot_layout(guides="collect") & theme(legend.position = "none")
-    }
-    return(p)
-  }
-  
-  # Compute global scale limits across all features 
-  # Use Seurat::FetchData to fetch values (works for both assay features and meta.data)
-  # If FetchData fails for features (rare), fallback to GetAssayData.
-  fetch_ok <- TRUE
-  vals_df <- tryCatch({
-    Seurat::FetchData(seurat_object, vars = all_found_features, slot = layer)
-  }, error = function(e){
-    fetch_ok <<- FALSE
-    NULL
-  })
-  if(!fetch_ok){
-    # fallback: try to get from default assay
-    assay_name <- Seurat::DefaultAssay(seurat_object)
-    vals_df <- do.call(cbind, lapply(all_found_features, function(f){
-      mm <- tryCatch(Seurat::GetAssayData(seurat_object[[assay_name]], slot = layer)[f, , drop = TRUE],
-                     error = function(e) rep(NA, ncol(seurat_object)))
-      return(mm)
-    }))
-    colnames(vals_df) <- all_found_features
-    vals_df <- as.data.frame(vals_df)
-  }
-  
-  # compute global max (ignore NA). Lower bound will be na_cutoff
-  global_max <- suppressWarnings(max(as.matrix(vals_df), na.rm = TRUE))
-  if(is.infinite(global_max) || is.na(global_max)) global_max <- NA_real_
-  color_limits <- c(na_cutoff, global_max)
-  # If all values are <= na_cutoff or NA, set an upper slightly > na_cutoff to allow scale to draw
-  if(!is.na(global_max) && global_max <= na_cutoff){
-    color_limits[2] <- na_cutoff + 1e-6
-  }
-  
-  # Name for the legend (consistent across plots)
-  # legend_name <- "Expression level"
-  
-  # Create single plots (combine = FALSE) and enforce identical scale 
-  plot_list <- lapply(all_found_features, function(feat){
-    gglist <- FeaturePlot(
-      seurat_object,
-      features = feat,
-      pt.size = pt.size,
-      order = order,
-      reduction = reduction,
-      raster = raster,
-      raster.dpi = raster.dpi,
-      label = label,
-      combine = FALSE,   # crucial: return a list of ggplot objects
-      ...
-    )
-    # Extract ggplot object safely (FeaturePlot returns a list)
-    p <- gglist[[1]]
+  suppressWarnings(suppressMessages({
     
-    # Apply identical color scale and theme (use + to add ggplot scale)
-    p <- p +
-      scale_color_gradientn(
-        colours = colors_use,
-        limits = color_limits,
-        na.value = na_color,
-        name = NULL,
-        guide = guide_colorbar(
-          title = NULL,
-          title.theme = element_text(angle = legend.title.angle, vjust = 0.5),
-          title.position = legend.title.pos,
-          direction = legend.orientation,
-          barwidth = as.numeric(legend.width),
-          barheight = as.numeric(legend.height),
-          frame.colour = "black",size=0.2,
+    # Checks
+    if (!inherits(object, "Seurat"))
+      stop("object must be a Seurat object")
+    
+    features <- intersect(
+      unique(as.character(features)),
+      c(rownames(object), colnames(object@meta.data))
+    )
+    
+    if (length(features) == 0)
+      stop("No valid features found")
+    
+    reduction <- reduction %||% SeuratObject::DefaultDimReduc(object)
+    
+    # Colors
+    # if (is.null(cols)) {
+    #   cols <- RColorBrewer::brewer.pal(9, theme.cols)
+    # }
+    # if (rev.cols) cols <- rev(cols)
+    
+    # Colors
+    if (!is.null(cols)) {
+      if (length(cols) < 2)
+        stop("colors_use must contain at least 2 colors")
+      cols <- cols
+      if (rev.cols) cols <- rev(cols)
+      
+    } else if (isTRUE(viridis)) {
+      
+      if (!requireNamespace("viridis", quietly = TRUE))
+        stop("Package 'viridis' is required when viridis = TRUE")
+      
+      cols <- viridis::viridis(9, option = viridis.opt)
+      if (rev.cols) cols <- rev(cols)
+      
+    } else {
+      
+      pal <- list(
+        hotspot = c("navy", "lightblue", "yellow", "orange", "red"),
+        rainbow = c("blue", "green", "yellow", "orange", "red")
+      )
+      
+      if (theme.cols %in% names(pal)) {
+        cols <- pal[[theme.cols]]
+      } else {
+        cols <- RColorBrewer::brewer.pal(9, theme.cols)
+      }
+      
+      if (rev.cols) cols <- rev(cols)
+    }
+    
+    
+    
+    # Point size
+    raster <- raster %||% (ncol(object) > 2e5)
+    if (is.null(pt.size)) {
+      pt.size <- if (raster) 1 else min(1583 / ncol(object), 1)
+    }
+    
+    ## Global max for merged legend
+    global_max <- NA
+    if (merge.leg && is.null(split.by) && length(features) > 1 && !blend) {
+      expr_data <- Seurat::FetchData(object, vars = features, layer = layer)
+      global_max <- max(expr_data, na.rm = TRUE)
+    }
+    
+    # Plot
+    plt <- Seurat::FeaturePlot(
+      object = object,
+      features = features,
+      reduction = reduction,
+      order = order,
+      pt.size = pt.size,
+      raster = raster,
+      raster.dpi = raster.dpi,
+      split.by = split.by,
+      combine = combine,
+      blend = blend,
+      label = label,
+      ncol = ncol,
+      ...
+    )
+    
+    # Apply color scale (always)
+    # if (!blend) {
+    #   if (merge.leg && is.null(split.by) && length(features) > 1) {
+    #     # Shared global scale
+    #     plt <-  plt & scale_color_gradientn(
+    #       colors = cols,
+    #       limits = c(na.cutoff, global_max),
+    #       na.value = na.col
+    #     )
+    #   } else {
+    #     # Per-feature scale
+    #     plt <- plt & scale_color_gradientn(
+    #       colors = cols,
+    #       limits = c(na.cutoff, NA),
+    #       na.value = na.col,
+    #       name = NULL
+    #     )
+    #   }
+    # }
+    
+    # Determine palette behavior
+    like <- isTRUE(viridis) || theme.cols %in% c("hotspot", "rainbow")
+    
+    # Brewer palettes should gray-out low expression
+    if (!like && !blend) {
+      
+      plt <- plt & scale_color_gradientn(
+        colors = cols,
+        limits = c(na.cutoff, NA),
+        oob = scales::censor,     # force < cutoff → NA
+        na.value = na.col,        # show gray
+        name = NULL
+      )} else if (!blend) {
+      # No gray background
+      plt <- plt & scale_color_gradientn(
+        colors = cols,
+        limits = c(na.cutoff, NA),
+        oob = scales::squish,     # clip instead of NA
+        na.value = NA
+      )
+    }
+    
+    # Theme
+    plt <- plt & plot_theme(theme.style = theme.style, font.size = font.size, ...) &
+      theme(plot.title = element_text(
+        hjust = 0.5, size = font.size + 2, face = "bold.italic"
+      ))
+    
+    # ONLY add colorbar guide for non-blend plots
+    if (!blend) {
+      plt <- plt & guides(
+        color = guide_colorbar(
+          frame.colour = "black",
           ticks.colour = "black"
         )
-      ) +
-      theme(
-        plot.title = element_text(hjust = 0.5, size = base_size, face = "bold.italic"),
-        legend.title = element_text(size = legend.text.size, face = "bold", hjust = 0.5),
-        legend.text = element_text(size = legend.text.size)
       )
+    }
     
-    if(no_axes) p <- p & NoAxes()
-    return(p)
-  })
-  
-  # Combine plots and merge legend 
-  plt <- wrap_plots(plot_list, ncol = ncol)
-  
-  if(merge_legend){
-    # Use plot_layout(guides="collect") at patchwork level
-    # then set overall legend position
-    plt <- plt + plot_layout(guides = "collect") &
-      theme(legend.position = merge.leg.pos, legend.justification = "center")
-  }
-  
-  return(plt)
+    # Manage axes
+    if (!axes) {
+      plt <- plt & Seurat::NoAxes()
+    }
+    
+    ## Merge legend 
+    if (merge.leg && is.null(split.by) && length(features) > 1) {
+      plt <- Seurat::CombinePlots(plots = plt, legend = "right", ncol = ncol)
+    }
+    
+    return(plt)
+  }))
 }
-
